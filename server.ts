@@ -253,21 +253,111 @@ async function queryRouterOSv6Api(router: RouterConfig, endpoint: string): Promi
       sendSentence(['/quit']);
     });
 
+    let loginStep = 0; // 0: sent /login, 1: sent challenge response, 2: sent print/command
+    let challengeHex = '';
+
     client.on('data', (chunk) => {
       dataBuffer = Buffer.concat([dataBuffer, chunk]);
+      const resStr = dataBuffer.toString('utf8');
+
+      if (loginStep === 0 && resStr.includes('!done')) {
+        // Check for challenge response in v6 (ret=HEX)
+        const match = resStr.match(/=ret=([a-fA-F0-9]+)/);
+        if (match) {
+          challengeHex = match[1];
+          loginStep = 1;
+          dataBuffer = Buffer.alloc(0); // reset buffer
+
+          // Calculate MD5 challenge response
+          const md5 = crypto.createHash('md5');
+          md5.update(Buffer.from('\x00' + (router.passwordSecret || ''), 'binary'));
+          md5.update(Buffer.from(challengeHex, 'hex'));
+          const digest = md5.digest('hex');
+
+          const encodeWord = (word: string) => {
+            const len = Buffer.byteLength(word);
+            if (len < 0x80) {
+              const b = Buffer.alloc(1);
+              b.writeUInt8(len, 0);
+              return Buffer.concat([b, Buffer.from(word)]);
+            } else if (len < 0x4000) {
+              const b = Buffer.alloc(2);
+              b.writeUInt16BE(len | 0x8000, 0);
+              return Buffer.concat([b, Buffer.from(word)]);
+            } else {
+              const b = Buffer.alloc(4);
+              b.writeInt32BE(len | 0xC0000000, 0);
+              return Buffer.concat([b, Buffer.from(word)]);
+            }
+          };
+
+          const sendSentence = (words: string[]) => {
+            for (const w of words) {
+              client.write(encodeWord(w));
+            }
+            client.write(Buffer.alloc(1));
+          };
+
+          sendSentence(['/login']);
+          sendSentence(['=name=' + router.username]);
+          sendSentence(['=response=00' + digest]);
+        } else {
+          // No challenge, direct success or fail
+          loginStep = 2;
+        }
+      } else if (loginStep === 1 && resStr.includes('!done')) {
+        loginStep = 2;
+        dataBuffer = Buffer.alloc(0);
+
+        const encodeWord = (word: string) => {
+          const len = Buffer.byteLength(word);
+          if (len < 0x80) {
+            const b = Buffer.alloc(1);
+            b.writeUInt8(len, 0);
+            return Buffer.concat([b, Buffer.from(word)]);
+          } else if (len < 0x4000) {
+            const b = Buffer.alloc(2);
+            b.writeUInt16BE(len | 0x8000, 0);
+            return Buffer.concat([b, Buffer.from(word)]);
+          } else {
+            const b = Buffer.alloc(4);
+            b.writeInt32BE(len | 0xC0000000, 0);
+            return Buffer.concat([b, Buffer.from(word)]);
+          }
+        };
+
+        const sendSentence = (words: string[]) => {
+          for (const w of words) {
+            client.write(encodeWord(w));
+          }
+          client.write(Buffer.alloc(1));
+        };
+
+        if (endpoint === '/system/resource') {
+          sendSentence(['/system/resource/print']);
+        } else if (endpoint === '/interface') {
+          sendSentence(['/interface/print']);
+        } else if (endpoint === '/ppp/active') {
+          sendSentence(['/ppp/active/print']);
+        } else if (endpoint === '/ip/hotspot/active') {
+          sendSentence(['/ip/hotspot/active/print']);
+        } else {
+          sendSentence([endpoint + '/print']);
+        }
+
+        sendSentence(['/quit']);
+      }
     });
 
     client.on('close', () => {
       clearTimeout(timeout);
       try {
-        // Parse API v6 reply
         const responseStr = dataBuffer.toString('utf8', 0, dataBuffer.length);
         if (responseStr.includes('!done')) {
           router.status = 'online';
           router.lastError = undefined;
           router.lastSeen = new Date().toISOString();
 
-          // Convert API v6 format to REST format expected by app
           if (endpoint === '/system/resource') {
             const getVal = (key: string) => {
               const match = responseStr.match(new RegExp(`=${key}=(.*?)(?=\\x00|!)`));
@@ -286,12 +376,10 @@ async function queryRouterOSv6Api(router: RouterConfig, endpoint: string): Promi
             });
             return;
           }
-
-          // Return dummy array for interfaces/clients if parsed
           resolve([]);
         } else {
           router.status = 'offline';
-          router.lastError = 'Autentikasi API v6 gagal (Username/Password salah)';
+          router.lastError = 'Autentikasi API v6 gagal (Username/Password salah atau challenge MD5 ditolak)';
           resolve(null);
         }
       } catch (e: any) {
