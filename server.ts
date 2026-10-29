@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
