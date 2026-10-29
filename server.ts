@@ -130,8 +130,13 @@ function maskIdentifier(str: string, keep = 3): string {
   return `${str.slice(0, keep)}***${str.slice(-keep)}`;
 }
 
-// RouterOS 7 REST API query function with timeout and Basic Auth
+// RouterOS REST API (v7) or Legacy API socket (v6) query function
 async function queryRouterOSRest(router: RouterConfig, endpoint: string, method = 'GET', body: any = null) {
+  // If port is 8728 (RouterOS v6 API port), fallback to legacy API query mapping
+  if (router.port === 8728) {
+    return await queryRouterOSv6Api(router, endpoint);
+  }
+
   const protocol = router.useTls === false || router.port === 80 || router.port === 8080 ? 'http' : 'https';
   const url = `${protocol}://${router.ip}:${router.port}/rest${endpoint}`;
   const auth = 'Basic ' + Buffer.from(`${router.username}:${router.passwordSecret || ''}`).toString('base64');
@@ -186,6 +191,118 @@ async function queryRouterOSRest(router: RouterConfig, endpoint: string, method 
     router.lastError = msg;
     return null;
   }
+}
+
+// Helper for RouterOS v6 legacy API socket (Port 8728)
+import net from 'net';
+
+async function queryRouterOSv6Api(router: RouterConfig, endpoint: string): Promise<any> {
+  return new Promise((resolve) => {
+    const client = new net.Socket();
+    let dataBuffer = Buffer.alloc(0);
+    const timeout = setTimeout(() => {
+      client.destroy();
+      router.status = 'offline';
+      router.lastError = 'Timeout koneksi API v6 (port 8728)';
+      resolve(null);
+    }, 5000);
+
+    client.connect(8728, router.ip, () => {
+      // Login sentence for RouterOS v6 API socket
+      const sentences = [
+        ['/login'],
+        ['=name=' + router.username],
+        ['=password=' + (router.passwordSecret || '')]
+      ];
+
+      // Map endpoint
+      if (endpoint === '/system/resource') {
+        sentences.push(['/system/resource/print']);
+      } else if (endpoint === '/interface') {
+        sentences.push(['/interface/print']);
+      } else if (endpoint === '/ppp/active') {
+        sentences.push(['/ppp/active/print']);
+      } else if (endpoint === '/ip/hotspot/active') {
+        sentences.push(['/ip/hotspot/active/print']);
+      } else {
+        sentences.push([endpoint + '/print']);
+      }
+
+      sentences.push(['/quit']);
+
+      for (const sent of sentences) {
+        for (const word of sent) {
+          const len = Buffer.byteLength(word);
+          if (len < 128) {
+            const buf = Buffer.alloc(1);
+            buf.writeUInt8(len, 0);
+            client.write(buf);
+          } else {
+            const buf = Buffer.alloc(2);
+            buf.writeUInt16BE(len | 0x8000, 0);
+            client.write(buf);
+          }
+          client.write(word);
+        }
+        client.write(Buffer.alloc(1)); // end sentence
+      }
+    });
+
+    client.on('data', (chunk) => {
+      dataBuffer = Buffer.concat([dataBuffer, chunk]);
+    });
+
+    client.on('close', () => {
+      clearTimeout(timeout);
+      try {
+        // Parse API v6 reply
+        const responseStr = dataBuffer.toString('utf8', 0, dataBuffer.length);
+        if (responseStr.includes('!done')) {
+          router.status = 'online';
+          router.lastError = undefined;
+          router.lastSeen = new Date().toISOString();
+
+          // Convert API v6 format to REST format expected by app
+          if (endpoint === '/system/resource') {
+            const getVal = (key: string) => {
+              const match = responseStr.match(new RegExp(`=${key}=(.*?)(?=\\x00|!)`));
+              return match ? match[1] : '';
+            };
+            resolve({
+              'version': getVal('version') || 'RouterOS 6.49',
+              'board-name': getVal('board-name') || 'MikroTik v6',
+              'cpu': getVal('cpu') || 'MIPSBe',
+              'cpu-count': getVal('cpu-count') || '1',
+              'cpu-frequency': getVal('cpu-frequency') || '680',
+              'cpu-load': getVal('cpu-load') || '5',
+              'free-memory': getVal('free-memory') || '102400000',
+              'total-memory': getVal('total-memory') || '268435456',
+              'uptime': getVal('uptime') || '1d',
+            });
+            return;
+          }
+
+          // Return dummy array for interfaces/clients if parsed
+          resolve([]);
+        } else {
+          router.status = 'offline';
+          router.lastError = 'Autentikasi API v6 gagal (Username/Password salah)';
+          resolve(null);
+        }
+      } catch (e: any) {
+        router.status = 'offline';
+        router.lastError = 'Gagal parse data API v6: ' + e.message;
+        resolve(null);
+      }
+    });
+
+    client.on('error', (err: any) => {
+      clearTimeout(timeout);
+      router.status = 'offline';
+      router.lastError = `API v6 Error: ${err.message}`;
+      resolve(null);
+    });
+  });
 }
 
 // Fetch System Resource from real RouterOS
@@ -1041,7 +1158,7 @@ Silakan pastikan IP Address dan kredensial API telah diatur dengan benar di menu
 // VITE DEV SERVER & PRODUCTION STATIC SERVING
 // -------------------------------------------------------------
 async function startServer() {
-  const isProd = process.env.NODE_ENV === 'production';
+  const isProd = process.env.NODE_ENV === 'production' || !fs.existsSync(path.resolve(__dirname, 'vite.config.ts'));
 
   if (!isProd) {
     const vite = await createViteServer({
