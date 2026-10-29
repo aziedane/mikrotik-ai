@@ -138,6 +138,7 @@ export const api = {
     username?: string;
     password?: string;
     useTls?: boolean;
+    osVersion?: 'v7' | 'v6';
   }): Promise<{ success: boolean; message: string; router: any }> {
     const res = await fetch('/api/settings/router-config', {
       method: 'POST',

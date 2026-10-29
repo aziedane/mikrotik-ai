@@ -39,6 +39,7 @@ export interface RouterConfig {
   ip: string;
   port: number;
   useTls: boolean;
+  osVersion?: 'v7' | 'v6';
   username: string;
   passwordSecret?: string;
   status: 'online' | 'offline';
@@ -132,8 +133,8 @@ function maskIdentifier(str: string, keep = 3): string {
 
 // RouterOS REST API (v7) or Legacy API socket (v6) query function
 async function queryRouterOSRest(router: RouterConfig, endpoint: string, method = 'GET', body: any = null) {
-  // If port is 8728 (RouterOS v6 API port), fallback to legacy API query mapping
-  if (router.port === 8728) {
+  // If router is configured as RouterOS v6, use legacy API socket
+  if (router.osVersion === 'v6' || router.port === 8728) {
     return await queryRouterOSv6Api(router, endpoint);
   }
 
@@ -208,44 +209,48 @@ async function queryRouterOSv6Api(router: RouterConfig, endpoint: string): Promi
     }, 5000);
 
     client.connect(8728, router.ip, () => {
-      // Login sentence for RouterOS v6 API socket
-      const sentences = [
-        ['/login'],
-        ['=name=' + router.username],
-        ['=password=' + (router.passwordSecret || '')]
-      ];
-
-      // Map endpoint
-      if (endpoint === '/system/resource') {
-        sentences.push(['/system/resource/print']);
-      } else if (endpoint === '/interface') {
-        sentences.push(['/interface/print']);
-      } else if (endpoint === '/ppp/active') {
-        sentences.push(['/ppp/active/print']);
-      } else if (endpoint === '/ip/hotspot/active') {
-        sentences.push(['/ip/hotspot/active/print']);
-      } else {
-        sentences.push([endpoint + '/print']);
-      }
-
-      sentences.push(['/quit']);
-
-      for (const sent of sentences) {
-        for (const word of sent) {
-          const len = Buffer.byteLength(word);
-          if (len < 128) {
-            const buf = Buffer.alloc(1);
-            buf.writeUInt8(len, 0);
-            client.write(buf);
-          } else {
-            const buf = Buffer.alloc(2);
-            buf.writeUInt16BE(len | 0x8000, 0);
-            client.write(buf);
-          }
-          client.write(word);
+      // Login sentence for RouterOS v6 API socket (correct length-prefix binary framing)
+      const encodeWord = (word: string) => {
+        const len = Buffer.byteLength(word);
+        if (len < 0x80) {
+          const b = Buffer.alloc(1);
+          b.writeUInt8(len, 0);
+          return Buffer.concat([b, Buffer.from(word)]);
+        } else if (len < 0x4000) {
+          const b = Buffer.alloc(2);
+          b.writeUInt16BE(len | 0x8000, 0);
+          return Buffer.concat([b, Buffer.from(word)]);
+        } else {
+          const b = Buffer.alloc(4);
+          b.writeInt32BE(len | 0xC0000000, 0);
+          return Buffer.concat([b, Buffer.from(word)]);
         }
-        client.write(Buffer.alloc(1)); // end sentence
+      };
+
+      const sendSentence = (words: string[]) => {
+        for (const w of words) {
+          client.write(encodeWord(w));
+        }
+        client.write(Buffer.alloc(1)); // Null byte ends sentence
+      };
+
+      sendSentence(['/login']);
+      sendSentence(['=name=' + router.username]);
+      sendSentence(['=password=' + (router.passwordSecret || '')]);
+
+      if (endpoint === '/system/resource') {
+        sendSentence(['/system/resource/print']);
+      } else if (endpoint === '/interface') {
+        sendSentence(['/interface/print']);
+      } else if (endpoint === '/ppp/active') {
+        sendSentence(['/ppp/active/print']);
+      } else if (endpoint === '/ip/hotspot/active') {
+        sendSentence(['/ip/hotspot/active/print']);
+      } else {
+        sendSentence([endpoint + '/print']);
       }
+
+      sendSentence(['/quit']);
     });
 
     client.on('data', (chunk) => {
@@ -1022,7 +1027,7 @@ app.post('/api/settings/toggle-mode', (req, res) => {
 });
 
 app.post('/api/settings/router-config', async (req, res) => {
-  const { routerId, ip, port, username, password, useTls } = req.body;
+  const { routerId, ip, port, username, password, useTls, osVersion } = req.body;
   const router = routersConfig.find((r) => r.id === routerId);
   if (!router) {
     return res.status(404).json({ error: 'Router tidak ditemukan' });
@@ -1032,6 +1037,14 @@ app.post('/api/settings/router-config', async (req, res) => {
   if (port) router.port = Number(port);
   if (username) router.username = username.trim();
   if (password !== undefined) router.passwordSecret = password;
+  if (osVersion) {
+    router.osVersion = osVersion;
+    if (osVersion === 'v6' && (!port || port === 443 || port === 80)) {
+      router.port = 8728;
+    } else if (osVersion === 'v7' && port === 8728) {
+      router.port = 443;
+    }
+  }
   if (useTls !== undefined) {
     router.useTls = Boolean(useTls);
   } else if (port) {

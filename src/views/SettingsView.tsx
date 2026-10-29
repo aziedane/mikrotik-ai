@@ -47,12 +47,14 @@ export function SettingsView({
   const [r1Ip, setR1Ip] = useState(r1Summary?.ip || '192.168.1.1');
   const [r1Port, setR1Port] = useState(r1Summary?.port || 443);
   const [r1UseTls, setR1UseTls] = useState(r1Summary?.useTls ?? true);
+  const [r1OsVersion, setR1OsVersion] = useState<'v7' | 'v6'>('v7');
   const [r1User, setR1User] = useState('api-readonly');
   const [r1Pass, setR1Pass] = useState('');
 
   const [r2Ip, setR2Ip] = useState(r2Summary?.ip || '192.168.88.1');
-  const [r2Port, setR2Port] = useState(r2Summary?.port || 443);
-  const [r2UseTls, setR2UseTls] = useState(r2Summary?.useTls ?? true);
+  const [r2Port, setR2Port] = useState(r2Summary?.port || 8728);
+  const [r2UseTls, setR2UseTls] = useState(r2Summary?.useTls ?? false);
+  const [r2OsVersion, setR2OsVersion] = useState<'v7' | 'v6'>('v6');
   const [r2User, setR2User] = useState('api-readonly');
   const [r2Pass, setR2Pass] = useState('');
 
@@ -64,6 +66,7 @@ export function SettingsView({
         if (r1.ip) setR1Ip(r1.ip);
         if (r1.port) setR1Port(r1.port);
         if (r1.useTls !== undefined) setR1UseTls(r1.useTls);
+        if (r1.osVersion) setR1OsVersion(r1.osVersion);
         if (r1.username) setR1User(r1.username);
       }
       const r2 = routers.find((r: any) => r.id === 'router-2');
@@ -71,6 +74,7 @@ export function SettingsView({
         if (r2.ip) setR2Ip(r2.ip);
         if (r2.port) setR2Port(r2.port);
         if (r2.useTls !== undefined) setR2UseTls(r2.useTls);
+        if (r2.osVersion) setR2OsVersion(r2.osVersion);
         if (r2.username) setR2User(r2.username);
       }
     }).catch(console.error);
@@ -89,6 +93,7 @@ export function SettingsView({
         ip: r1Ip,
         port: r1Port,
         useTls: r1UseTls,
+        osVersion: r1OsVersion,
         username: r1User,
         password: r1Pass || undefined,
       });
@@ -113,6 +118,7 @@ export function SettingsView({
         ip: r2Ip,
         port: r2Port,
         useTls: r2UseTls,
+        osVersion: r2OsVersion,
         username: r2User,
         password: r2Pass || undefined,
       });
@@ -456,28 +462,34 @@ pm2 save`;
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 block mb-1">Protokol</label>
+                  <label className="text-slate-300 block mb-1">Versi RouterOS</label>
                   <select
-                    value={r1UseTls ? 'https' : 'http'}
+                    value={r1OsVersion}
                     onChange={(e) => {
-                      const isTls = e.target.value === 'https';
-                      setR1UseTls(isTls);
-                      setR1Port(isTls ? 443 : 80);
+                      const ver = e.target.value as 'v7' | 'v6';
+                      setR1OsVersion(ver);
+                      if (ver === 'v6') {
+                        setR1Port(8728);
+                        setR1UseTls(false);
+                      } else {
+                        setR1Port(443);
+                        setR1UseTls(true);
+                      }
                     }}
                     className="w-full bg-slate-950 text-slate-200 px-3 py-2 rounded-xl border border-slate-700 font-mono focus:border-cyan-500"
                   >
-                    <option value="https">HTTPS (SSL)</option>
-                    <option value="http">HTTP (Non-SSL)</option>
+                    <option value="v7">RouterOS v7 (REST API)</option>
+                    <option value="v6">RouterOS v6 (API Socket)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-slate-300 block mb-1">Port REST API</label>
+                  <label className="text-slate-300 block mb-1">Port API</label>
                   <input
                     type="number"
                     value={r1Port}
                     onChange={(e) => setR1Port(Number(e.target.value))}
-                    placeholder="443 atau 80"
+                    placeholder="443 atau 8728"
                     className="w-full bg-slate-950 text-slate-200 px-3 py-2 rounded-xl border border-slate-700 font-mono focus:border-cyan-500"
                   />
                 </div>
@@ -562,28 +574,34 @@ pm2 save`;
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 block mb-1">Protokol</label>
+                  <label className="text-slate-300 block mb-1">Versi RouterOS</label>
                   <select
-                    value={r2UseTls ? 'https' : 'http'}
+                    value={r2OsVersion}
                     onChange={(e) => {
-                      const isTls = e.target.value === 'https';
-                      setR2UseTls(isTls);
-                      setR2Port(isTls ? 443 : 80);
+                      const ver = e.target.value as 'v7' | 'v6';
+                      setR2OsVersion(ver);
+                      if (ver === 'v6') {
+                        setR2Port(8728);
+                        setR2UseTls(false);
+                      } else {
+                        setR2Port(443);
+                        setR2UseTls(true);
+                      }
                     }}
                     className="w-full bg-slate-950 text-slate-200 px-3 py-2 rounded-xl border border-slate-700 font-mono focus:border-cyan-500"
                   >
-                    <option value="https">HTTPS (SSL)</option>
-                    <option value="http">HTTP (Non-SSL)</option>
+                    <option value="v7">RouterOS v7 (REST API)</option>
+                    <option value="v6">RouterOS v6 (API Socket)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="text-slate-300 block mb-1">Port REST API</label>
+                  <label className="text-slate-300 block mb-1">Port API</label>
                   <input
                     type="number"
                     value={r2Port}
                     onChange={(e) => setR2Port(Number(e.target.value))}
-                    placeholder="443 atau 80"
+                    placeholder="443 atau 8728"
                     className="w-full bg-slate-950 text-slate-200 px-3 py-2 rounded-xl border border-slate-700 font-mono focus:border-cyan-500"
                   />
                 </div>
