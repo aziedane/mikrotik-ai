@@ -1,0 +1,6 @@
+{
+  "name": "MikroTik AI Assistant",
+  "description": "Aplikasi monitoring, audit, dan diagnosis jaringan MikroTik (RouterOS v7) dengan bantuan AI untuk gateway PPPoE dan Hotspot pada STB Armbian Linux.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

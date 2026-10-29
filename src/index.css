@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+html {
+  background-color: #020617;
+  color: #f8fafc;
+}
+
+html.dark {
+  background-color: #020617;
+  color: #f8fafc;
+}
+
+html:not(.dark) {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  background-color: #020617;
+}
+
+/* Fallback solid dark hex colors for headless/software-rendered Linux engines */
+.bg-slate-950 {
+  background-color: #020617 !important;
+}
+
+.bg-slate-900 {
+  background-color: #0f172a !important;
+}
+
+.bg-slate-800 {
+  background-color: #1e293b !important;
+}
+
+@layer utilities {
+  /* Clean thin scrollbars for dashboard panels */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.4);
+  }
+}
+
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+}
